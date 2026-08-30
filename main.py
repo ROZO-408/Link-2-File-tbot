@@ -14,7 +14,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "البوت المطور يعمل بنجاح ومستيقظ!"
+    return "بوت التحميل المطور مستيقظ ويعمل!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -30,26 +30,25 @@ if not os.path.exists(DOWNLOAD_DIR):
 
 def extract_and_download_media(profile_url):
     ydl_opts = {
-        'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',  # صيغة اسم الملف المحمل
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',  # إجبار جلب MP4 حقيقي
-        'playlist_items': '1-10',   # فحص آخر 10 منشورات
-        'merge_output_format': 'mp4',
+        'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
+        # 🔥 جلب صيغ mp4 الجاهزة والمدمجة مسبقاً لتقليل الاعتماد الإلزامي على FFmpeg في السيرفر
+        'format': 'best[ext=mp4]/best',  
+        'playlist_items': '1-10',   
         'nocheckcertificate': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
     }
     
-    # 🍪 تفعيل الكوكيز للحسابات الخاصة
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
-        logger.info("🍪 تم تفعيل ملف Cookies.txt.")
+        logger.info("🍪 تم دمج ملف Cookies.txt بنجاح.")
         
     media_items = []
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            # جلب البيانات وتحميل الملفات فعلياً على السيرفر لتجاوز تعمية تويتر
+            # تحميل الملف فعلياً
             info = ydl.extract_info(profile_url, download=True)
             entries = info.get('entries', [info])
             
@@ -58,10 +57,10 @@ def extract_and_download_media(profile_url):
                     continue
                 
                 title = entry.get('title', 'ملف ميديا')
-                # توقع المسار الذي تم حفظ ملف الفيديو فيه
-                expected_filename = f"{DOWNLOAD_DIR}/{entry['id']}.mp4"
+                ext = entry.get('ext', 'mp4')
+                expected_filename = f"{DOWNLOAD_DIR}/{entry['id']}.{ext}"
                 
-                # إذا تم تحميل الفيديو بنجاح كملف حقيقي
+                # التحقق إذا تم حفظ الملف بنجاح على السيرفر كفيديو
                 if os.path.exists(expected_filename):
                     media_items.append({
                         "type": "فيديو 🎬",
@@ -69,7 +68,7 @@ def extract_and_download_media(profile_url):
                         "file_path": expected_filename,
                         "is_file": True
                     })
-                # إذا كان المنشور عبارة عن صور فقط ولم يتم تحميل فيديو
+                # إذا كان المنشور عبارة عن صورة فقط
                 elif entry.get('thumbnails'):
                     best_image_url = entry['thumbnails'][-1]['url']
                     if 'twimg.com' in best_image_url and 'name=' in best_image_url:
@@ -82,55 +81,52 @@ def extract_and_download_media(profile_url):
                     })
                     
         except Exception as e:
-            logger.error(f"حدث خطأ أثناء استخراج وتحميل الميديا: {e}")
+            logger.error(f"حدث خطأ أثناء الاستخراج أو التحميل: {e}")
             
     return media_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 أهلاً بك في البوت المطور! أرسل لي رابط حساب تويتر (X) أو رابط منشور، وسأقوم بتحميل الفيديوهات وإرسالها لك مباشرة كملفات قابلة للتشغيل.")
+    await update.message.reply_text("👋 مرحباً بك! أرسل لي أي رابط لتويتر، وسأقوم بتحميل ملف الميديا الفعلي وإرساله لك كفيديو كامل.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
     user_chat_id = update.message.chat_id
     
     if "twitter.com" in user_url or "x.com" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري تحميل الميديا وتجاوز الحظر، قد يستغرق الأمر لحظات...")
-        
+        status_message = await update.message.reply_text("⏳ جاري تحميل مقطع الفيديو وتجاوز قيود البث...")
         media_items = extract_and_download_media(user_url)
         
         if media_items:
-            await status_message.delete()  # حذف رسالة التحميل
+            await status_message.delete() # حذف رسالة الانتظار لتنظيف المحادثة
             
             for index, item in enumerate(media_items, 1):
                 try:
-                    # إذا كانت المادة فيديو تم تحميله كملف
+                    # إذا كان فيديو حقيقي تم تحميله بنجاح
                     if item['is_file']:
                         with open(item['file_path'], 'rb') as video_file:
                             await context.bot.send_video(
                                 chat_id=user_chat_id,
                                 video=video_file,
-                                caption=f"🎯 **المادة رقم {index}**\n📦 النوع: {item['type']}\n📝 العنوان: {item['title']}"
+                                caption=f"🎯 **المادة رقم {index}**\n📝 العنوان: {item['title']}"
                             )
-                        # حذف الملف فوراً من السيرفر بعد إرساله لتوفير المساحة
+                        # تنظيف السيرفر فوراً وحذف الفيديو لتوفير المساحة
                         os.remove(item['file_path'])
-                    
-                    # إذا كانت المادة صورة (رابط مباشر)
+                    # إذا كانت صورة
                     else:
                         await context.bot.send_message(
                             chat_id=user_chat_id,
-                            text=f"🎯 **المادة رقم {index}**\n📦 النوع: {item['type']}\n\n🔗 رابط الصورة المباشر:\n{item['url']}"
+                            text=f"🎯 **المادة رقم {index}**\n📦 النوع: {item['type']}\n\n🔗 رابط الصورة:\n{item['url']}"
                         )
                 except Exception as e:
-                    logger.error(f"فشل إرسال المادة: {e}")
-                    # الاحتياط لحذف الملف في حال فشل الإرسال
+                    logger.error(f"فشل إرسال الملف للمستخدم: {e}")
                     if item['is_file'] and os.path.exists(item['file_path']):
                         os.remove(item['file_path'])
                         
-            await update.message.reply_text("🎉 تم تحميل وإرسال جميع المواد المتاحة بنجاح.")
+            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح.")
         else:
-            await status_message.edit_text("❌ لم يتم العثور على أي ميديا. تأكد من إعداد ملف cookies.txt إذا كان الحساب خاصاً.")
+            await status_message.edit_text("❌ فشل تحميل الفيديو كملف حقيقي. تأكد من أن الرابط صحيح أو قم بتحديث cookies.txt للحسابات المغلقة.")
     else:
-        await update.message.reply_text("⚠️ من فضلك أرسل رابط حساب تويتر (X) صحيح.")
+        await update.message.reply_text("⚠️ من فضلك أرسل رابط تويتر (X) صحيح.")
 
 def main():
     server_thread = Thread(target=run_web_server)
@@ -141,9 +137,9 @@ def main():
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
     
-    logger.info("🤖 جاري تشغيل بوت التحميل المباشر...")
+    logger.info("🤖 البوت يعمل على معالجة ملفات الفيديو الحقيقية...")
     telegram_app.run_polling()
 
 if __name__ == '__main__':
     main()
-                        
+    
