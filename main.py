@@ -4,7 +4,7 @@ import cv2  # مكتبة OpenCV لجلب أبعاد الفيديو وتوليد 
 from threading import Thread
 from flask import Flask
 import yt_dlp
-from telegram import Update
+from telegram import Update, InputMediaPhoto
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # تسجيل الأخطاء
@@ -15,7 +15,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "بوت التحميل الفوري النظيف يعمل!"
+    return "بوت التحميل الفوري الشامل النظيف يعمل!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -76,64 +76,119 @@ def extract_and_download_media(profile_url):
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
-            info = ydl.extract_info(profile_url, download=True)
-            entries = info.get('entries', [info])
+            # نقوم أولاً بفحص البيانات دون تحميل لمعرفة البنية
+            info = ydl.extract_info(profile_url, download=False)
             
-            for entry in entries:
-                if not entry:
-                    continue
+            # التحقق مما إذا كان المنشور يحتوي على ألبوم صور أو مدخلات متعددة
+            entries = info.get('entries', [])
+            
+            # إذا لم تكن entries قائمة، أو كانت فارغة والمنشور نفسه يحتوي علىthumbnails (حالة تويتر/منشور أحادي)
+            if not entries:
+                # نتحقق هل هو فيديو أم صورة
+                is_video = info.get('vcodec') != 'none' or 'video' in info.get('extractor_key', '').lower()
                 
-                ext = entry.get('ext', 'mp4')
-                expected_filename = f"{DOWNLOAD_DIR}/{entry['id']}.{ext}"
-                
-                if os.path.exists(expected_filename):
-                    # جلب الأبعاد والصورة المصغرة للفيديو
-                    width, height, duration, thumb = get_video_meta_and_thumb(expected_filename)
-                    media_items.append({
-                        "type": "فيديو 🎬",
-                        "file_path": expected_filename,
-                        "is_file": True,
-                        "width": width,
-                        "height": height,
-                        "duration": duration,
-                        "thumb": thumb
-                    })
-                elif entry.get('thumbnails'):
-                    best_image_url = entry['thumbnails'][-1]['url']
-                    if 'twimg.com' in best_image_url and 'name=' in best_image_url:
-                        best_image_url = best_image_url.split('&name=') + '&name=large'
-                    media_items.append({
-                        "type": "صورة 🖼️",
-                        "url": best_image_url,
-                        "is_file": False
-                    })
+                if is_video:
+                    # تحميله فعلياً كفيديو
+                    info_download = ydl.extract_info(profile_url, download=True)
+                    ext = info_download.get('ext', 'mp4')
+                    expected_filename = f"{DOWNLOAD_DIR}/{info_download['id']}.{ext}"
+                    if os.path.exists(expected_filename):
+                        width, height, duration, thumb = get_video_meta_and_thumb(expected_filename)
+                        media_items.append({
+                            "type": "فيديو 🎬",
+                            "file_path": expected_filename,
+                            "is_file": True,
+                            "width": width,
+                            "height": height,
+                            "duration": duration,
+                            "thumb": thumb
+                        })
+                else:
+                    # معالجة كصورة منفردة
+                    if info.get('thumbnails'):
+                        best_image_url = info['thumbnails'][-1]['url']
+                        if 'twimg.com' in best_image_url and 'name=' in best_image_url:
+                            best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                        media_items.append({
+                            "type": "صورة 🖼️",
+                            "url": best_image_url,
+                            "is_file": False
+                        })
+            else:
+                # إذا كانت هناك مدخلات متعددة (ألبوم صور أو عدة فيديوهات معاً)
+                for entry in entries:
+                    if not entry:
+                        continue
                     
+                    is_video = entry.get('vcodec') != 'none' or 'video' in entry.get('extractor_key', '').lower()
+                    
+                    if is_video:
+                        # تحميل الفيديو المحدد من الألبوم
+                        entry_url = entry.get('webpage_url') or profile_url
+                        info_download = ydl.extract_info(entry_url, download=True)
+                        ext = info_download.get('ext', 'mp4')
+                        expected_filename = f"{DOWNLOAD_DIR}/{info_download['id']}.{ext}"
+                        if os.path.exists(expected_filename):
+                            width, height, duration, thumb = get_video_meta_and_thumb(expected_filename)
+                            media_items.append({
+                                "type": "فيديو 🎬",
+                                "file_path": expected_filename,
+                                "is_file": True,
+                                "width": width,
+                                "height": height,
+                                "duration": duration,
+                                "thumb": thumb
+                            })
+                    else:
+                        # معالجة الصور داخل الألبوم الجماعي
+                        if entry.get('thumbnails'):
+                            best_image_url = entry['thumbnails'][-1]['url']
+                            if 'twimg.com' in best_image_url and 'name=' in best_image_url:
+                                best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                            media_items.append({
+                                "type": "صورة 🖼️",
+                                "url": best_image_url,
+                                "is_file": False
+                            })
+                        elif entry.get('url') and not is_video:
+                            best_image_url = entry['url']
+                            if 'twimg.com' in best_image_url and 'name=' in best_image_url:
+                                best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                            media_items.append({
+                                "type": "صورة 🖼️",
+                                "url": best_image_url,
+                                "is_file": False
+                            })
+                            
         except Exception as e:
             logger.error(f"حدث خطأ أثناء الاستخراج أو التحميل: {e}")
             
     return media_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 مرحباً بك! أرسل لي الرابط، وسأقوم بإرسال الفيديو لك نظيفاً تماماً بدون أي كتابات وبدعم التشغيل الفوري.")
+    await update.message.reply_text("👋 مرحباً بك! أرسل لي الرابط، وسأقوم بإرسال الفيديو أو مجموعة الصور لك نظيفة تماماً بدون أي كتابات وبدعم الألبومات والتشغيل الفوري.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
     user_chat_id = update.message.chat_id
     
     if "http" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري سحب الميديا النظيفة بالكامل...")
+        status_message = await update.message.reply_text("⏳ جاري سحب وتحليل الميديا بالكامل...")
         media_items = extract_and_download_media(user_url)
         
         if media_items:
             await status_message.delete()
             
+            # مصفوفة لتجميع الصور إذا وجدنا ألبوم أو مجموعة صور
+            photo_group = []
+            
             for item in media_items:
                 try:
                     if item['is_file']:
+                        # إرسال الفيديوهات بشكل منفرد مع المشاهدة الفورية
                         with open(item['file_path'], 'rb') as video_file:
                             thumb_file = open(item['thumb'], 'rb') if item['thumb'] else None
                             
-                            # 🚫 تم مسح الـ caption بالكامل ليرسل الفيديو بدون أي نصوص أو كتابات
                             await context.bot.send_video(
                                 chat_id=user_chat_id,
                                 video=video_file,
@@ -141,43 +196,25 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 height=item['height'],
                                 duration=item['duration'],
                                 thumbnail=thumb_file,
-                                supports_streaming=True # تفعيل ميزة المشاهدة أثناء التحميل
+                                supports_streaming=True
                             )
                             
                             if thumb_file:
                                 thumb_file.close()
                                 os.remove(item['thumb'])
                                 
-                        # حذف الفيديو من السيرفر بعد إرساله لتوفير المساحة
                         os.remove(item['file_path'])
                     else:
-                        # في حال كانت صورة يرسل الرابط المباشر فقط
-                        await context.bot.send_message(
-                            chat_id=user_chat_id,
-                            text=f"{item['url']}"
-                        )
+                        # إذا كانت صورة، نقوم بإضافتها إلى مصفوفة المجموعة لإرسالها كألبوم لاحقاً
+                        photo_group.append(InputMediaPhoto(media=item['url']))
                 except Exception as e:
                     logger.error(f"فشل إرسال الملف: {e}")
                     if item['is_file'] and os.path.exists(item['file_path']):
                         os.remove(item['file_path'])
-                        
-            # 🚫 تم إلغاء وحذف رسالة "تم إرسال جميع الملفات بنجاح" نهائياً من هنا بناءً على طلبك
-        else:
-            await status_message.edit_text("❌ فشل جلب الفيديو.")
-    else:
-        await update.message.reply_text("⚠️ من فضلك أرسل رابط ويب صحيح.")
-
-def main():
-    server_thread = Thread(target=run_web_server)
-    server_thread.daemon = True
-    server_thread.start()
-
-    telegram_app = Application.builder().token(BOT_TOKEN).build()
-    telegram_app.add_handler(CommandHandler("start", start))
-    telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
-    
-    telegram_app.run_polling()
-
-if __name__ == '__main__':
-    main()
-    
+            
+            # إرسال الصور المجمعة كألبوم (Media Group) إذا كانت هناك صور متوفرة
+            if photo_group:
+                try:
+                    # تلجرام يسمح بإرسال حتى 10 صور كألبوم في الرسالة الواحدة
+                    # نقوم بتقسيم الصور لمجموعات كل مجموعة 10 صور كحد أقصى لتفادي أخطاء تلجرام
+                    
