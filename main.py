@@ -82,7 +82,6 @@ def extract_and_download_media(profile_url):
             # التحقق مما إذا كان المنشور يحتوي على ألبوم صور أو مدخلات متعددة
             entries = info.get('entries', [])
             
-            # إذا لم تكن entries قائمة، أو كانت فارغة والمنشور نفسه يحتوي علىthumbnails (حالة تويتر/منشور أحادي)
             if not entries:
                 # نتحقق هل هو فيديو أم صورة
                 is_video = info.get('vcodec') != 'none' or 'video' in info.get('extractor_key', '').lower()
@@ -108,7 +107,7 @@ def extract_and_download_media(profile_url):
                     if info.get('thumbnails'):
                         best_image_url = info['thumbnails'][-1]['url']
                         if 'twimg.com' in best_image_url and 'name=' in best_image_url:
-                            best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                            best_image_url = best_image_url.split('&name=') + '&name=large'
                         media_items.append({
                             "type": "صورة 🖼️",
                             "url": best_image_url,
@@ -144,7 +143,7 @@ def extract_and_download_media(profile_url):
                         if entry.get('thumbnails'):
                             best_image_url = entry['thumbnails'][-1]['url']
                             if 'twimg.com' in best_image_url and 'name=' in best_image_url:
-                                best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                                best_image_url = best_image_url.split('&name=') + '&name=large'
                             media_items.append({
                                 "type": "صورة 🖼️",
                                 "url": best_image_url,
@@ -153,7 +152,7 @@ def extract_and_download_media(profile_url):
                         elif entry.get('url') and not is_video:
                             best_image_url = entry['url']
                             if 'twimg.com' in best_image_url and 'name=' in best_image_url:
-                                best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                                best_image_url = best_image_url.split('&name=') + '&name=large'
                             media_items.append({
                                 "type": "صورة 🖼️",
                                 "url": best_image_url,
@@ -179,13 +178,11 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if media_items:
             await status_message.delete()
             
-            # مصفوفة لتجميع الصور إذا وجدنا ألبوم أو مجموعة صور
             photo_group = []
             
             for item in media_items:
                 try:
                     if item['is_file']:
-                        # إرسال الفيديوهات بشكل منفرد مع المشاهدة الفورية
                         with open(item['file_path'], 'rb') as video_file:
                             thumb_file = open(item['thumb'], 'rb') if item['thumb'] else None
                             
@@ -205,16 +202,26 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 
                         os.remove(item['file_path'])
                     else:
-                        # إذا كانت صورة، نقوم بإضافتها إلى مصفوفة المجموعة لإرسالها كألبوم لاحقاً
                         photo_group.append(InputMediaPhoto(media=item['url']))
                 except Exception as e:
                     logger.error(f"فشل إرسال الملف: {e}")
                     if item['is_file'] and os.path.exists(item['file_path']):
                         os.remove(item['file_path'])
             
-            # إرسال الصور المجمعة كألبوم (Media Group) إذا كانت هناك صور متوفرة
+            # إرسال الصور المجمعة كألبوم مع ضبط المسافات البرمجية بدقة لمنع الخطأ
             if photo_group:
                 try:
-                    # تلجرام يسمح بإرسال حتى 10 صور كألبوم في الرسالة الواحدة
-                    # نقوم بتقسيم الصور لمجموعات كل مجموعة 10 صور كحد أقصى لتفادي أخطاء تلجرام
-                    
+                    for i in range(0, len(photo_group), 10):
+                        await context.bot.send_media_group(chat_id=user_chat_id, media=photo_group[i:i+10])
+                except Exception as e:
+                    logger.error(f"فشل إرسال ألبوم الصور: {e}")
+        else:
+            await status_message.edit_text("❌ فشل جلب الميديا.")
+    else:
+        await update.message.reply_text("⚠️ من فضلك أرسل رابط ويب صحيح.")
+
+def main():
+    server_thread = Thread(target=run_web_server)
+    server_thread.daemon = True
+    server_thread.start()
+
