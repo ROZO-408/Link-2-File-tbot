@@ -1,6 +1,7 @@
 import os
 import logging
 import cv2
+import subprocess
 from threading import Thread
 from flask import Flask
 import yt_dlp
@@ -14,7 +15,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "بوت تحميل الفيديوهات الفوري الصافي يعمل!"
+    return "بوت تحميل الفيديوهات الفوري الصافي والمطور يعمل!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -26,22 +27,48 @@ if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
 def get_video_meta_and_thumb(video_path):
-    width, height, duration, thumb_path = 0, 0, 0, video_path + "_thumb.jpg"
+    """
+    دالة مطورة تعتمد على محركين (OpenCV و FFmpeg) لضمان جلب أبعاد الفيديو
+    وتوليد صورة مصغرة صحيحة تمنع ظهور الفيديو كمستند أسود نهائياً.
+    """
+    width, height, duration = 640, 360, 0  # أبعاد افتراضية آمنة في حال الفشل
+    thumb_path = video_path + "_thumb.jpg"
+    
+    # المحرك الأول: استخدام OpenCV والتقاط إطار متقدم لتفادي التلف البرمجي في البداية
     try:
         cap = cv2.VideoCapture(video_path)
         if cap.isOpened():
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            width_val = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height_val = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if width_val > 0 and height_val > 0:
+                width, height = width_val, height_val
+                
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
             if fps > 0:
                 duration = int(frame_count / fps)
+            
+            # الانتقال للإطار رقم 5 لتجنب الإطارات الأولى التالفة أو السوداء
+            cap.set(cv2.CAP_PROP_POS_FRAMES, min(5, max(0, frame_count - 1)))
             ret, frame = cap.read()
             if ret:
                 cv2.imwrite(thumb_path, frame)
         cap.release()
     except Exception as e:
-        logger.error(f"Error meta: {e}")
+        logger.error(f"OpenCV meta error: {e}")
+
+    # المحرك الثاني والاحتياطي: استخدام FFmpeg قسرياً إذا فشل OpenCV في توليد الصورة
+    if not os.path.exists(thumb_path) or os.path.getsize(thumb_path) == 0:
+        try:
+            # التقاط صورة عند الثانية 00:00:01 عبر أدوات النظام
+            cmd = [
+                'ffmpeg', '-y', '-ss', '00:00:01', '-i', video_path,
+                '-vframes', '1', '-q:v', '2', thumb_path
+            ]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        except Exception as e:
+            logger.error(f"FFmpeg fallback thumbnail error: {e}")
+            
     return width, height, duration, thumb_path if os.path.exists(thumb_path) else None
 
 def extract_and_download_video(profile_url):
@@ -68,7 +95,6 @@ def extract_and_download_video(profile_url):
                 if not entry:
                     continue
                 
-                # فحص إلزامي للتأكد من أن المادة فيديو حصرياً وليس صورة
                 is_video = entry.get('vcodec') != 'none' or 'video' in entry.get('extractor_key', '').lower()
                 ext = entry.get('ext', 'mp4')
                 expected_file = f"{DOWNLOAD_DIR}/{entry['id']}.{ext}"
@@ -76,11 +102,11 @@ def extract_and_download_video(profile_url):
                 if is_video and os.path.exists(expected_file):
                     width, height, duration, thumb = get_video_meta_and_thumb(expected_file)
                     video_items.append({
-                        "file_path": expected_file,
-                        "width": width,
-                        "height": height,
-                        "duration": duration,
-                        "thumb": thumb
+                        'file_path': expected_file,
+                        'width': width,
+                        'height': height,
+                        'duration': duration,
+                        'thumb': thumb
                     })
         except Exception as e:
             logger.error(f"حدث خطأ أثناء تحميل الفيديو: {e}")
@@ -88,7 +114,7 @@ def extract_and_download_video(profile_url):
     return video_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 مرحباً بك! أرسل لي أي رابط يحتوي على فيديو، وسأقوم بتحميله وإرساله لك فوراً بشكل صافٍ وبدعم التشغيل الفوري.")
+    await update.message.reply_text("👋 مرحباً بك! أرسل لي أي رابط يحتوي على فيديو، وسأقوم بمعالجته بدقة وإرساله فوراً كفيديو حقيقي يدعم البث.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
@@ -98,7 +124,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ من فضلك أرسل رابط ويب صحيح.")
         return
 
-    status_message = await update.message.reply_text("⏳ جاري تحميل مقطع الفيديو بالكامل...")
+    status_message = await update.message.reply_text("⏳ جاري تحميل الفيديو وتأمين بيانات البث الفوري...")
     video_items = extract_and_download_video(user_url)
     
     if not video_items:
@@ -110,9 +136,9 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for item in video_items:
         try:
             with open(item['file_path'], 'rb') as video_file:
-                thumb_file = open(item['thumb'], 'rb') if item['thumb'] else None
+                thumb_file = open(item['thumb'], 'rb') if (item['thumb'] and os.path.exists(item['thumb'])) else None
                 
-                # إرسال الفيديو صافي تماماً (بدون caption وبدون رسائل لاحقة)
+                # إرسال الفيديو الصافي مع الأبعاد الإجبارية والمحرك الاحتياطي لتفعيل زر التشغيل الفوري دائماً
                 await context.bot.send_video(
                     chat_id=user_chat_id,
                     video=video_file,
@@ -124,7 +150,8 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 if thumb_file:
                     thumb_file.close()
-                    os.remove(item['thumb'])
+                    if os.path.exists(item['thumb']):
+                        os.remove(item['thumb'])
                     
             os.remove(item['file_path'])
         except Exception as e:
@@ -144,3 +171,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
