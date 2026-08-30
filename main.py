@@ -31,18 +31,20 @@ if not os.path.exists(DOWNLOAD_DIR):
 def extract_and_download_media(profile_url):
     ydl_opts = {
         'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
-        # 🔥 جلب صيغ mp4 الجاهزة والمدمجة مسبقاً لتقليل الاعتماد الإلزامي على FFmpeg في السيرفر
-        'format': 'best[ext=mp4]/best',  
+        # جلب أفضل جودة متوفرة ودمجها تلقائياً
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',  
         'playlist_items': '1-10',   
         'nocheckcertificate': True,
+        'merge_output_format': 'mp4',
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
     }
     
+    # 🍪 تفعيل الكوكيز للحسابات الخاصة
     if os.path.exists('cookies.txt'):
         ydl_opts['cookiefile'] = 'cookies.txt'
-        logger.info("🍪 تم دمج ملف Cookies.txt بنجاح.")
+        logger.info("🍪 تم تفعيل ملف Cookies.txt.")
         
     media_items = []
     
@@ -93,7 +95,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_chat_id = update.message.chat_id
     
     if "twitter.com" in user_url or "x.com" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري تحميل مقطع الفيديو وتجاوز قيود البث...")
+        status_message = await update.message.reply_text("⏳ جاري سحب وتحميل مقطع الفيديو بالكامل...")
         media_items = extract_and_download_media(user_url)
         
         if media_items:
@@ -122,7 +124,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if item['is_file'] and os.path.exists(item['file_path']):
                         os.remove(item['file_path'])
                         
-            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح.")
+            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح كفيديو حقيقي.")
         else:
             await status_message.edit_text("❌ فشل تحميل الفيديو كملف حقيقي. تأكد من أن الرابط صحيح أو قم بتحديث cookies.txt للحسابات المغلقة.")
     else:
