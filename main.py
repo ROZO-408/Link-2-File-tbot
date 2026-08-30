@@ -15,7 +15,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "بوت التحميل الفوري المطور يعمل!"
+    return "بوت التحميل الفوري النظيف يعمل!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -83,7 +83,6 @@ def extract_and_download_media(profile_url):
                 if not entry:
                     continue
                 
-                title = entry.get('title', 'ملف ميديا')
                 ext = entry.get('ext', 'mp4')
                 expected_filename = f"{DOWNLOAD_DIR}/{entry['id']}.{ext}"
                 
@@ -92,7 +91,6 @@ def extract_and_download_media(profile_url):
                     width, height, duration, thumb = get_video_meta_and_thumb(expected_filename)
                     media_items.append({
                         "type": "فيديو 🎬",
-                        "title": title,
                         "file_path": expected_filename,
                         "is_file": True,
                         "width": width,
@@ -106,7 +104,6 @@ def extract_and_download_media(profile_url):
                         best_image_url = best_image_url.split('&name=') + '&name=large'
                     media_items.append({
                         "type": "صورة 🖼️",
-                        "title": title,
                         "url": best_image_url,
                         "is_file": False
                     })
@@ -117,26 +114,26 @@ def extract_and_download_media(profile_url):
     return media_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 مرحباً بك! أرسل لي الرابط، وسأقوم بتحميل ملف الميديا وإرساله لك كفيديو يدعم التشغيل الفوري والغلاف.")
+    await update.message.reply_text("👋 مرحباً بك! أرسل لي الرابط، وسأقوم بإرسال الفيديو لك نظيفاً تماماً بدون أي كتابات وبدعم التشغيل الفوري.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
     user_chat_id = update.message.chat_id
     
     if "http" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري تحميل مقطع الفيديو وتوليد بيانات البث الفوري...")
+        status_message = await update.message.reply_text("⏳ جاري سحب الميديا النظيفة بالكامل...")
         media_items = extract_and_download_media(user_url)
         
         if media_items:
             await status_message.delete()
             
-            for index, item in enumerate(media_items, 1):
+            for item in media_items:
                 try:
                     if item['is_file']:
-                        # فتح الفيديو والصورة المصغرة وإرسالهما مع الأبعاد المطلوبة لتفعيل البث الفوري
                         with open(item['file_path'], 'rb') as video_file:
                             thumb_file = open(item['thumb'], 'rb') if item['thumb'] else None
                             
+                            # 🚫 تم مسح الـ caption بالكامل ليرسل الفيديو بدون أي نصوص أو كتابات
                             await context.bot.send_video(
                                 chat_id=user_chat_id,
                                 video=video_file,
@@ -144,29 +141,29 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 height=item['height'],
                                 duration=item['duration'],
                                 thumbnail=thumb_file,
-                                caption=f"🎯 **المادة رقم {index}**\n📝 العنوان: {item['title']}",
                                 supports_streaming=True # تفعيل ميزة المشاهدة أثناء التحميل
                             )
                             
                             if thumb_file:
                                 thumb_file.close()
-                                os.remove(item['thumb']) # حذف الصورة المصغرة المؤقتة
+                                os.remove(item['thumb'])
                                 
-                        # تنظيف الفيديو من السيرفر بعد إرساله بناءً على رغبتك في توفير مساحة سيرفر Render
+                        # حذف الفيديو من السيرفر بعد إرساله لتوفير المساحة
                         os.remove(item['file_path'])
                     else:
+                        # في حال كانت صورة يرسل الرابط المباشر فقط
                         await context.bot.send_message(
                             chat_id=user_chat_id,
-                            text=f"🎯 **المادة رقم {index}**\n📦 النوع: {item['type']}\n\n🔗 رابط الصورة:\n{item['url']}"
+                            text=f"{item['url']}"
                         )
                 except Exception as e:
-                    logger.error(f"فشل إرسال الملف للمستخدم: {e}")
+                    logger.error(f"فشل إرسال الملف: {e}")
                     if item['is_file'] and os.path.exists(item['file_path']):
                         os.remove(item['file_path'])
                         
-            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح ودعم التشغيل الفوري.")
+            # 🚫 تم إلغاء وحذف رسالة "تم إرسال جميع الملفات بنجاح" نهائياً من هنا بناءً على طلبك
         else:
-            await status_message.edit_text("❌ فشل تحميل الفيديو.")
+            await status_message.edit_text("❌ فشل جلب الفيديو.")
     else:
         await update.message.reply_text("⚠️ من فضلك أرسل رابط ويب صحيح.")
 
@@ -183,4 +180,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-                        
+    
