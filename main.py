@@ -14,7 +14,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "بوت التحميل المطور مستيقظ ويعمل!"
+    return "بوت التحميل الفوري مستيقظ ويعمل!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -88,14 +88,14 @@ def extract_and_download_media(profile_url):
     return media_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 مرحباً بك! أرسل لي أي رابط لتويتر، وسأقوم بتحميل ملف الميديا الفعلي وإرساله لك كفيديو كامل.")
+    await update.message.reply_text("👋 مرحباً بك! أرسل لي أي رابط لتويتر، وسأقوم بتحميل ملف الميديا الفعلي وإرساله لك كفيديو يدعم التشغيل الفوري.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
     user_chat_id = update.message.chat_id
     
     if "twitter.com" in user_url or "x.com" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري سحب وتحميل مقطع الفيديو بالكامل...")
+        status_message = await update.message.reply_text("⏳ جاري سحب وتحميل مقطع الفيديو بالكامل للتشغيل الفوري...")
         media_items = extract_and_download_media(user_url)
         
         if media_items:
@@ -109,10 +109,11 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             await context.bot.send_video(
                                 chat_id=user_chat_id,
                                 video=video_file,
-                                caption=f"🎯 **المادة رقم {index}**\n📝 العنوان: {item['title']}"
+                                caption=f"🎯 **المادة رقم {index}**\n📝 العنوان: {item['title']}",
+                                supports_streaming=True # 🔥 تفعيل ميزة المشاهدة أثناء التحميل داخل التلجرام
                             )
-                        # تنظيف السيرفر فوراً وحذف الفيديو لتوفير المساحة
-                        os.remove(item['file_path'])
+                        # ⚠️ تم إلغاء مسح الملف (البوت لن يحذف مقاطع الفيديو المحملة من السيرفر الآن)
+                        # os.remove(item['file_path'])
                     # إذا كانت صورة
                     else:
                         await context.bot.send_message(
@@ -121,12 +122,10 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
                 except Exception as e:
                     logger.error(f"فشل إرسال الملف للمستخدم: {e}")
-                    if item['is_file'] and os.path.exists(item['file_path']):
-                        os.remove(item['file_path'])
                         
-            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح كفيديو حقيقي.")
+            await update.message.reply_text("🎉 تم إرسال الملفات بنجاح ودعم التشغيل الفوري.")
         else:
-            await status_message.edit_text("❌ فشل تحميل الفيديو كملف حقيقي. تأكد من أن الرابط صحيح أو قم بتحديث cookies.txt للحسابات المغلقة.")
+            await status_message.edit_text("❌ فشل تحميل الفيديو كملف حقيقي. تأكد من أن الرابط صحيح أو قم بتحديث cookies.txt للجروبات/الحسابات المغلقة.")
     else:
         await update.message.reply_text("⚠️ من فضلك أرسل رابط تويتر (X) صحيح.")
 
@@ -144,4 +143,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-    
+                        
