@@ -14,61 +14,80 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "البوت يعمل بنجاح ومستيقظ!"
+    return "البوت المطور يعمل بنجاح ومستيقظ!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# جلب توكن البوت بأمان من إعدادات Render
+# جلب توكن البوت بأمان
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-def extract_video_direct_links(profile_url):
+def extract_all_media_links(profile_url):
     ydl_opts = {
         'extract_flat': False,      
-        'skip_download': True,      # 🚫 منع تحميل الملف على السيرفر (سحب روابط فقط)
-        'playlist_items': '1-10',   # سحب آخر 10 منشورات فقط لتفادي الحظر
+        'skip_download': True,      # سحب روابط فقط بدون تحميل
+        'playlist_items': '1-10',   # فحص آخر 10 منشورات
     }
-    direct_links = []
+    
+    # 🍪 إذا قمت برفع ملف كوكيز باسم cookies.txt بجانب الكود، سيستخدمه البوت لفتح الحسابات الخاصة
+    if os.path.exists('cookies.txt'):
+        ydl_opts['cookiefile'] = 'cookies.txt'
+        logger.info("🍪 تم العثور على ملف Cookies.txt وتفعيله لفتح الحسابات الخاصة.")
+        
+    media_links = []
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             info = ydl.extract_info(profile_url, download=False)
-            if 'entries' in info:
-                for entry in info['entries']:
-                    if entry and 'url' in entry:
-                        direct_links.append(entry['url'])
-            else:
-                if 'url' in info:
-                    direct_links.append(info['url'])
-        except Exception as e:
-            logger.error(f"حدث خطأ أثناء استخراج الروابط: {e}")
             
-    return direct_links
+            entries = info.get('entries', [info])
+            
+            for entry in entries:
+                if not entry:
+                    continue
+                
+                # 1. سحب روابط الفيديوهات المباشرة
+                if 'url' in entry and (entry.get('vcodec') != 'none' or 'video' in entry.get('extractor_key', '').lower()):
+                    media_links.append({"type": "فيديو 🎬", "url": entry['url']})
+                
+                # 2. سحب الصور المصاحبة للمنشورات بأعلى دقة متوفرة (Thumbnails/Images)
+                elif 'thumbnails' in entry and entry['thumbnails']:
+                    # جلب الرابط الأخير في قائمة الصور لأنه يمثل أعلى دقة دائماً
+                    best_image_url = entry['thumbnails'][-1]['url']
+                    # تعديل بسيط لجلب دقة تويتر الأصلية الكبيرة إذا كانت مصغرة
+                    if 'format=' in best_image_url:
+                        best_image_url = best_image_url.split('&name=')[0] + '&name=large'
+                    media_links.append({"type": "صورة 🖼️", "url": best_image_url})
+                    
+        except Exception as e:
+            logger.error(f"حدث خطأ أثناء استخراج الميديا: {e}")
+            
+    return media_links
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 أهلاً بك! أرسل لي رابط حساب تويتر (X) وسأقوم بسحب روابط الفيديوهات وإرسالها لك هنا مباشرة في الخاص.")
+    await update.message.reply_text("👋 أهلاً بك في البوت المطور! أرسل لي رابط حساب تويتر (X) وسأقوم بسحب جميع الصور والفيديوهات المتاحة وإرسالها لك مباشرة.")
 
 async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_url = update.message.text
-    # جلب معرف الشات الخاص بالمستخدم تلقائياً للإرسال له في الخاص
     user_chat_id = update.message.chat_id
     
     if "twitter.com" in user_url or "x.com" in user_url:
-        status_message = await update.message.reply_text("⏳ جاري فحص الحساب واستخراج روابط الفيديوهات المباشرة...")
-        video_links = extract_video_direct_links(user_url)
+        status_message = await update.message.reply_text("⏳ جاري اختراق القيود وفحص المنشورات وسحب الميديا...")
         
-        if video_links:
-            await status_message.edit_text(f"✅ تم العثور على {len(video_links)} رابط فيديو. جاري إرسالهم لك...")
-            for index, link in enumerate(video_links, 1):
+        media_items = extract_all_media_links(user_url)
+        
+        if media_items:
+            await status_message.edit_text(f"✅ تم العثور على {len(media_items)} ملف ميديا (صور/فيديوهات). جاري إرسالهم...")
+            for index, item in enumerate(media_items, 1):
                 try:
-                    caption = f"🎬 رابط الفيديو المباشر رقم {index}:\n\n{link}"
+                    caption = f"{item['type']} رقم {index} من الحساب:\n\n{item['url']}"
                     await context.bot.send_message(chat_id=user_chat_id, text=caption)
                 except Exception as e:
                     logger.error(f"فشل إرسال الرابط: {e}")
-            await update.message.reply_text("🎉 تم إرسال جميع الروابط بنجاح.")
+            await update.message.reply_text("🎉 تم إرسال جميع الصور والفيديوهات المتاحة بنجاح.")
         else:
-            await status_message.edit_text("❌ لم يتم العثور على فيديوهات أو الحساب خاص ومقيد.")
+            await status_message.edit_text("❌ لم يتم العثور على أي صور أو فيديوهات. تأكد من إعداد ملف cookies.txt إذا كان الحساب خاصاً.")
     else:
         await update.message.reply_text("⚠️ من فضلك أرسل رابط حساب تويتر (X) صحيح.")
 
@@ -81,8 +100,9 @@ def main():
     telegram_app.add_handler(CommandHandler("start", start))
     telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_link))
     
-    logger.info("🤖 جاري تشغيل البوت المباشر...")
+    logger.info("🤖 جاري تشغيل البوت المطور المباشر...")
     telegram_app.run_polling()
 
 if __name__ == '__main__':
     main()
+    
