@@ -45,65 +45,82 @@ def get_video_meta_and_thumb(video_path):
     return width, height, duration, thumb_path if os.path.exists(thumb_path) else None
 
 def extract_and_download_media(profile_url):
-    ydl_opts = {
-        'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
-        # سماح بتحميل أفضل جودة للفيديو أو الصور المتاحة
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestimages/best',
-        'playlist_items': '1-10',
+    # إعدادات الفحص الأولي السريع بدون تحميل لتحديد نوع الميديا
+    ydl_opts_info = {
+        'extract_flat': False,
+        'skip_download': True,
         'nocheckcertificate': True,
-        'merge_output_format': 'mp4',
-        'writethumbnail': True, # إجبار المحرك على تحميل الصور كملفات محلية لتفادي الحظر
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         }
     }
     if os.path.exists('cookies.txt'):
-        ydl_opts['cookiefile'] = 'cookies.txt'
+        ydl_opts_info['cookiefile'] = 'cookies.txt'
 
     media_items = []
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    
+    with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
         try:
-            # تحميل الميديا مباشرة لتجاوز الحظر وحماية السيرفرات
-            info = ydl.extract_info(profile_url, download=True)
+            info = ydl.extract_info(profile_url, download=False)
             entries = info.get('entries', [info])
             
             for entry in entries:
                 if not entry:
                     continue
                 
-                # فحص هل المادة فيديو أم صورة بناءً على الحزم المحملة
+                # فحص هل الرابط يحتوي على فيديو فعلي
                 is_video = entry.get('vcodec') != 'none' or 'video' in entry.get('extractor_key', '').lower()
-                ext = entry.get('ext', 'mp4')
-                expected_file = f"{DOWNLOAD_DIR}/{entry['id']}.{ext}"
                 
-                if is_video and os.path.exists(expected_file):
-                    width, height, duration, thumb = get_video_meta_and_thumb(expected_file)
-                    media_items.append({
-                        "type": "video",
-                        "file_path": expected_file,
-                        "width": width,
-                        "height": height,
-                        "duration": duration,
-                        "thumb": thumb
-                    })
+                if is_video:
+                    # إذا كان فيديو، نقوم بإنشاء إعدادات تحميل حقيقية وحفظه كملف mp4 لتشغيله الفوري
+                    ydl_opts_dl = {
+                        'outtmpl': f'{DOWNLOAD_DIR}/%(id)s.%(ext)s',
+                        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                        'nocheckcertificate': True,
+                        'merge_output_format': 'mp4',
+                    }
+                    if os.path.exists('cookies.txt'):
+                        ydl_opts_dl['cookiefile'] = 'cookies.txt'
+                        
+                    with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl_dl:
+                        info_dl = ydl_dl.extract_info(entry.get('webpage_url', profile_url), download=True)
+                        ext = info_dl.get('ext', 'mp4')
+                        expected_file = f"{DOWNLOAD_DIR}/{info_dl['id']}.{ext}"
+                        
+                        if os.path.exists(expected_file):
+                            width, height, duration, thumb = get_video_meta_and_thumb(expected_file)
+                            media_items.append({
+                                "type": "video",
+                                "file_path": expected_file,
+                                "width": width,
+                                "height": height,
+                                "duration": duration,
+                                "thumb": thumb
+                            })
                 else:
-                    # معالجة الصور التي تم تحميلها كملفات محلية (jpg, png, webp, jpeg)
-                    found_photo = False
-                    for possible_ext in ['jpg', 'jpeg', 'png', 'webp']:
-                        photo_file = f"{DOWNLOAD_DIR}/{entry['id']}.{possible_ext}"
-                        if os.path.exists(photo_file):
-                            media_items.append({"type": "photo", "file_path": photo_file})
-                            found_photo = True
-                            break
-                    
-                    # حل احتياطي إذا تم تحميل الصورة المصغرة فقط كمستند منفصل
-                    if not found_photo:
-                        thumb_file = f"{DOWNLOAD_DIR}/{entry['id']}.jpg"
-                        if os.path.exists(thumb_file):
-                            media_items.append({"type": "photo", "file_path": thumb_file})
-                            
+                    # 🖼️ إذا كان الرابط منشور صور، نستخرج الروابط المباشرة لجميع الصور بأعلى دقة متوفرة
+                    if entry.get('thumbnails'):
+                        best_url = entry['thumbnails'][-1]['url']
+                        # تحسين الدقة لصور تويتر وجلب الحجم الأصلي
+                        if 'twimg.com' in best_url:
+                            if 'name=' in best_url:
+                                best_url = best_url.split('&name=')[0] + '&name=large'
+                            elif 'format=' in best_url:
+                                best_url = best_url + '&name=large'
+                        media_items.append({"type": "photo", "url": best_url})
+                        
+                    elif entry.get('url'):
+                        best_url = entry['url']
+                        if 'twimg.com' in best_url:
+                            if 'name=' in best_url:
+                                best_url = best_url.split('&name=')[0] + '&name=large'
+                            elif 'format=' in best_url:
+                                best_url = best_url + '&name=large'
+                        media_items.append({"type": "photo", "url": best_url})
+                        
         except Exception as e:
-            logger.error(f"Error extracting/downloading: {e}")
+            logger.error(f"حدث خطأ أثناء الاستخراج: {e}")
+            
     return media_items
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,7 +142,7 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await status_message.delete()
-    photo_files_to_send = []
+    photo_group = []
 
     for item in media_items:
         if item["type"] == "video":
@@ -151,37 +168,16 @@ async def handle_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     os.remove(item['file_path'])
         
         elif item["type"] == "photo":
-            photo_files_to_send.append(item["file_path"])
+            # إضافة رابط الصورة عالية الدقة مباشرة إلى مجموعة الألبوم
+            photo_group.append(InputMediaPhoto(media=item["url"]))
 
-    # معالجة وإرسال الصور المجمعة محلياً كألبوم نظيف
-    if photo_files_to_send:
+    # إرسال ألبوم الصور المجمعة فوراً (كل رسالة تحتوي على 10 صور كحد أقصى تماشياً مع قواعد تلجرام)
+    if photo_group:
         try:
-            # نقوم بتقسيم الصور لمجموعات ألبومات (كل ألبوم 10 صور بحد أقصى)
-            for i in range(0, len(photo_files_to_send), 10):
-                chunk = photo_files_to_send[i:i+10]
-                media_group = []
-                opened_files = []
-                
-                for file_path in chunk:
-                    f = open(file_path, 'rb')
-                    opened_files.append(f)
-                    media_group.append(InputMediaPhoto(media=f))
-                
-                if media_group:
-                    await context.bot.send_media_group(chat_id=user_chat_id, media=media_group)
-                
-                # إغلاق الملفات وحذفها فوراً من السيرفر لتوفير المساحة بعد الإرسال
-                for f in opened_files:
-                    f.close()
-                for file_path in chunk:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
+            for i in range(0, len(photo_group), 10):
+                await context.bot.send_media_group(chat_id=user_chat_id, media=photo_group[i:i+10])
         except Exception as e:
             logger.error(f"Error photo group transmit: {e}")
-            # تنظيف احتياطي للملفات في حال فشل الإرسال
-            for file_path in photo_files_to_send:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
 
 def main():
     server_thread = Thread(target=run_web_server)
